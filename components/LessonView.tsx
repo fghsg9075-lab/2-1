@@ -60,42 +60,37 @@ export const LessonView: React.FC<Props> = ({
   // 2. HELPER FUNCTIONS (DOWNLOAD & SECURITY)
   // ==========================================
   
-  // Check if user is allowed to download specific content
+  // Permission Checker
   const checkDownloadPermission = (contentType: 'VIDEO' | 'PDF', isUltra: boolean) => {
-      // Agar user login nahi hai ya plan nahi hai to download band
       if (!user || !user.subscriptionPlan) return false;
 
       const plan = user.subscriptionPlan.toUpperCase();
       
-      // 1. Weekly & Monthly: NO DOWNLOADS ALLOWED
-      if (plan === 'WEEKLY' || plan === 'MONTHLY') {
-          return false;
-      }
+      // 1. Weekly & Monthly: NO DOWNLOADS
+      if (plan === 'WEEKLY' || plan === 'MONTHLY') return false;
 
-      // 2. 3 Months (Quarterly): Can download Normal Video & PDF, BUT NOT Ultra
+      // 2. 3 Months: Normal Video & PDF OK, Ultra NO
       if (plan === 'QUARTERLY' || plan === '3_MONTHS' || plan === '3 MONTHS') {
-          if (contentType === 'VIDEO' && isUltra) return false; // Ultra blocked
-          return true; // Normal & PDF allowed
+          if (contentType === 'VIDEO' && isUltra) return false;
+          return true; 
       }
 
-      // 3. 1 Year & Lifetime: EVERYTHING ALLOWED
+      // 3. 1 Year & Lifetime: ALL OK
       if (plan === 'YEARLY' || plan === 'LIFETIME' || plan === '1_YEAR' || plan === '1 YEAR') {
           return true;
       }
 
-      return false; // Default blocked
+      return false;
   };
 
-  // Generate Direct Download Link for Google Drive
+  // Robust Drive Link Generator
   const getDriveDownloadLink = (url: string) => {
-      let fileId = '';
-      if (url.includes('/file/d/')) fileId = url.split('/file/d/')[1].split('/')[0];
-      else if (url.includes('id=')) fileId = url.split('id=')[1].split('&')[0];
-      
-      return fileId ? `https://drive.google.com/u/0/uc?id=${fileId}&export=download` : null;
+      // Find ID using Regex (Works for all link types)
+      const idMatch = url.match(/[-\w]{25,}/); 
+      return idMatch ? `https://drive.google.com/u/0/uc?id=${idMatch[0]}&export=download` : null;
   };
 
-  // Nuclear Event Killer (Stops touch/click propagation)
+  // Nuclear Event Killer
   const killEvent = (e: any) => {
       e.stopPropagation();
       e.preventDefault();
@@ -127,7 +122,6 @@ export const LessonView: React.FC<Props> = ({
       }
   };
 
-  // MCQ Back Protection
   useEffect(() => {
       if (content?.type.includes('MCQ') && Object.keys(mcqState).length > 0 && !showResults) {
           const handleBeforeUnload = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
@@ -263,9 +257,9 @@ export const LessonView: React.FC<Props> = ({
   }
 
   // ==========================================
-  // 6. VIDEO RENDERER (DRIVE + YOUTUBE + DOWNLOAD LOGIC)
+  // 6. VIDEO RENDERER (FIXED GOOGLE DRIVE + YOUTUBE + DOWNLOAD)
   // ==========================================
-  if ((content.type === 'PDF_VIEWER' || content.type === 'VIDEO_LECTURE') && (content.content.includes('youtube.com') || content.content.includes('youtu.be') || content.content.includes('drive.google.com/file') || content.content.includes('.mp4') || (content.videoPlaylist && content.videoPlaylist.length > 0))) {
+  if ((content.type === 'PDF_VIEWER' || content.type === 'VIDEO_LECTURE') && (content.content.includes('youtube.com') || content.content.includes('youtu.be') || content.content.includes('drive.google.com') || content.content.includes('.mp4') || (content.videoPlaylist && content.videoPlaylist.length > 0))) {
       const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
       const playlist = content.videoPlaylist && content.videoPlaylist.length > 0 
           ? content.videoPlaylist 
@@ -277,38 +271,33 @@ export const LessonView: React.FC<Props> = ({
       let isDriveVideo = false;
       let isYouTubeVideo = false;
 
-      // Check if this is an "Ultra" video (Admin tags it or title has 'Ultra')
-      // Note: Assuming 'title' or 'tags' helps identify Ultra content
+      // Permission Check
       const isUltraContent = content.title.toLowerCase().includes('ultra') || (content.tags && content.tags.includes('ultra'));
       const canDownload = checkDownloadPermission('VIDEO', !!isUltraContent);
 
-      // --- URL PROCESSING ---
+      // --- ADVANCED URL PARSER (THE FIX) ---
       if (embedUrl.includes('drive.google.com')) {
           isDriveVideo = true;
-          // Auto Convert to Preview Link
-          if (embedUrl.includes('/file/d/')) {
-              const fileId = embedUrl.split('/file/d/')[1].split('/')[0];
-              embedUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-          } else if (embedUrl.includes('id=')) {
-              const fileId = embedUrl.split('id=')[1].split('&')[0];
-              embedUrl = `https://drive.google.com/file/d/${fileId}/preview`;
-          }
-          // Create download link only if allowed
-          if (canDownload) {
-              downloadUrl = getDriveDownloadLink(currentVideo.url);
+          // Extract ID using Regex (Handles all link types: view, open, etc)
+          const idMatch = embedUrl.match(/[-\w]{25,}/);
+          if (idMatch) {
+              embedUrl = `https://drive.google.com/file/d/${idMatch[0]}/preview`;
+              if (canDownload) {
+                  downloadUrl = `https://drive.google.com/u/0/uc?id=${idMatch[0]}&export=download`;
+              }
           }
       } 
       else if (embedUrl.includes('youtube.com') || embedUrl.includes('youtu.be')) {
           isYouTubeVideo = true;
-          if (embedUrl.includes('watch?v=')) {
-              embedUrl = `https://www.youtube.com/embed/${new URL(embedUrl).searchParams.get('v')}?autoplay=1`;
-          } else if (embedUrl.includes('youtu.be/')) {
-              embedUrl = `https://www.youtube.com/embed/${embedUrl.split('youtu.be/')[1]}?autoplay=1`;
+          // Regex for YouTube ID extraction
+          const ytMatch = embedUrl.match(/(?:youtu\.be\/|youtube\.com(?:\/embed\/|\/v\/|\/watch\?v=|\/user\/\S+|\/ytscreeningroom\?v=))([\w-]{11})/);
+          if (ytMatch) {
+              embedUrl = `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1`;
           }
-          downloadUrl = null; // YouTube videos cannot be downloaded via direct link
+          downloadUrl = null; 
       }
 
-      // Security Params for YouTube
+      // Secure Source for YouTube
       const secureSrc = isYouTubeVideo 
           ? `${embedUrl}&modestbranding=1&rel=0&iv_load_policy=3&controls=1&disablekb=1&showinfo=0&fs=0`
           : embedUrl;
@@ -325,7 +314,7 @@ export const LessonView: React.FC<Props> = ({
                        {isUltraContent && <span className="text-[9px] bg-yellow-500/20 text-yellow-400 px-2 py-0.5 rounded border border-yellow-500/50 font-bold uppercase tracking-widest mt-0.5">ULTRA</span>}
                    </div>
                    
-                   {/* DOWNLOAD BUTTON (Only Visible if Permission Granted) */}
+                   {/* DOWNLOAD BUTTON */}
                    {canDownload && downloadUrl ? (
                        <a href={downloadUrl} target="_blank" rel="noopener noreferrer" className="p-2 bg-green-600/20 text-green-400 border border-green-600/50 rounded-lg hover:bg-green-600 hover:text-white transition-all" title="Download Video">
                            <Download size={18} />
@@ -338,35 +327,25 @@ export const LessonView: React.FC<Props> = ({
               <div className="flex-1 flex flex-col md:flex-row overflow-hidden relative">
                   <div ref={containerRef} className="flex-1 bg-black relative group overflow-hidden select-none isolate">
                       
-                      {/* --- YOUTUBE SECURITY SHIELD (Share & Logo Blocker) --- */}
+                      {/* --- YOUTUBE SECURITY --- */}
                       {isYouTubeVideo && (
                           <>
                               {/* Top Right (Share Blocker) */}
                               <div style={{ position: 'absolute', top: 0, right: 0, width: '250px', height: '120px', zIndex: 2147483647, backgroundColor: 'rgba(255, 255, 255, 0.001)', touchAction: 'none' }} onClickCapture={killEvent} onTouchStartCapture={killEvent} />
                               {/* Bottom Right (Logo Redirect) */}
                               <a href="https://youtube.com/@ehsansir2.0?si=80l2sFqj85RnGulA" target="_blank" rel="noopener noreferrer" style={{ position: 'absolute', bottom: 0, right: 0, width: '180px', height: '80px', zIndex: 2147483647, backgroundColor: 'rgba(255, 255, 255, 0.001)', cursor: 'pointer', touchAction: 'auto' }} />
-                              {/* Bottom Left (Controls Blocker - Optional) */}
+                              {/* Bottom Left (Controls Blocker) */}
                               <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', height: '80px', zIndex: 2147483646, backgroundColor: 'rgba(255, 255, 255, 0.001)', touchAction: 'none' }} onClickCapture={killEvent} onTouchStartCapture={killEvent} />
                           </>
                       )}
 
-                      {/* --- GOOGLE DRIVE SECURITY SHIELD (Pop-out Blocker) --- */}
+                      {/* --- GOOGLE DRIVE SECURITY --- */}
                       {isDriveVideo && (
                           <>
-                              {/* Top Right Blocker (Stops Pop-out button) */}
+                              {/* Top Right Blocker (Pop-out button) */}
                               <div 
-                                style={{ 
-                                    position: 'absolute', 
-                                    top: 0, 
-                                    right: 0, 
-                                    width: '100px', 
-                                    height: '80px', 
-                                    zIndex: 2147483647, 
-                                    backgroundColor: 'rgba(255, 255, 255, 0.001)', 
-                                    touchAction: 'none' 
-                                }} 
-                                onClickCapture={killEvent} 
-                                onTouchStartCapture={killEvent}
+                                style={{ position: 'absolute', top: 0, right: 0, width: '100px', height: '80px', zIndex: 2147483647, backgroundColor: 'rgba(255, 255, 255, 0.001)', touchAction: 'none' }} 
+                                onClickCapture={killEvent} onTouchStartCapture={killEvent}
                                 onContextMenu={(e) => e.preventDefault()}
                               />
                           </>
@@ -419,12 +398,13 @@ export const LessonView: React.FC<Props> = ({
   if (content.type === 'PDF_VIEWER' || content.type === 'PDF_FREE' || content.type === 'PDF_PREMIUM') {
       const isPdf = content.content.toLowerCase().endsWith('.pdf') || content.content.includes('drive.google.com') || content.content.includes('docs.google.com');
       
-      // Check PDF Download Permission
       const canDownloadPdf = checkDownloadPermission('PDF', false); 
       let pdfDownloadLink = null;
 
+      // Extract Drive ID correctly for PDF
       if (content.content.includes('drive.google.com') && canDownloadPdf) {
-          pdfDownloadLink = getDriveDownloadLink(content.content);
+          const idMatch = content.content.match(/[-\w]{25,}/);
+          if (idMatch) pdfDownloadLink = `https://drive.google.com/u/0/uc?id=${idMatch[0]}&export=download`;
       } else if (canDownloadPdf) {
           pdfDownloadLink = content.content;
       }
@@ -438,7 +418,6 @@ export const LessonView: React.FC<Props> = ({
                    </div>
                    
                    <div className="flex items-center gap-2">
-                       {/* DOWNLOAD BUTTON FOR PDF */}
                        {canDownloadPdf && pdfDownloadLink && (
                            <a href={pdfDownloadLink} target="_blank" rel="noopener noreferrer" className="p-2 bg-green-100 text-green-700 rounded-xl hover:bg-green-200 transition-colors" title="Download PDF">
                                <Download size={20} />
@@ -452,7 +431,6 @@ export const LessonView: React.FC<Props> = ({
                       {isPdf ? (
                          <div className="relative w-full h-full group">
                             <iframe src={content.content.replace('/view', '/preview').replace('/edit', '/preview')} className="w-full h-full border-0" allowFullScreen sandbox="allow-scripts allow-same-origin" title="PDF Viewer" />
-                            {/* Drive Pop-out Blocker for PDF */}
                             <div className="absolute top-0 right-0 w-24 h-24 z-10 bg-transparent pointer-events-auto"></div>
                          </div>
                       ) : (
